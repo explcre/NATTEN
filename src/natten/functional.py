@@ -251,6 +251,47 @@ class NeighborhoodAttention3DAVAutogradFunction(Function):
         d_attn, d_value = outputs
         return d_attn, d_value, None, None, None, None
 
+class NeighborhoodAttention2DCrossQKAutogradFunction(Function):
+    @staticmethod
+    @custom_fwd
+    def forward(ctx, query, key, rpb, kernel_size, dilation):
+        # Ensure inputs are contiguous in memory
+        query = query.contiguous()
+        key = key.contiguous()
+        
+        # Forward pass (to be implemented in the C++/CUDA extension)
+        attn = _C.na2d_cross_qk_forward(query, key, rpb, kernel_size, dilation)
+        
+        # Save tensors for backward pass
+        ctx.save_for_backward(query, key)
+        ctx.kernel_size = kernel_size
+        ctx.dilation = dilation
+        ctx.bias = rpb is not None
+
+        return attn
+
+    @staticmethod
+    @custom_bwd
+    def backward(ctx, grad_out):
+        # Backward pass (to be implemented in the C++/CUDA extension)
+        outputs = _C.na2d_cross_qk_backward(
+            grad_out.contiguous(),
+            ctx.saved_tensors[0],
+            ctx.saved_tensors[1],
+            ctx.bias,
+            ctx.kernel_size,
+            ctx.dilation,
+        )
+
+        d_query, d_key, d_rpb = outputs
+        return d_query, d_key, d_rpb, None, None
+
+# Function to be called for Neighborhood Cross Attention 2D
+def natten2dcrossqkrpb(query, key, rpb, kernel_size, dilation):
+    return NeighborhoodAttention2DCrossQKAutogradFunction.apply(
+        query, key, rpb, kernel_size, dilation
+    )
+
 
 def natten1dqkrpb(query, key, rpb, kernel_size, dilation):
     return NeighborhoodAttention1DQKAutogradFunction.apply(
@@ -304,3 +345,4 @@ def natten3dav(attn, value, kernel_size_d, kernel_size, dilation_d, dilation):
     return NeighborhoodAttention3DAVAutogradFunction.apply(
         attn, value, kernel_size_d, kernel_size, dilation_d, dilation
     )
+
